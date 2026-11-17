@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.npm-cache/
+.DS_Store
+
+# API addresses belong in local environment files; never commit credentials.
+.env
+.env.*
+!.env.example
+
+# Keep native project source, exclude generated assets and toolchain output.
+**/Pods/
+**/DerivedData/
+**/build/
+**/.gradle/
+**/.idea/
+**/xcuserdata/
+**/*.xcuserstate
+**/local.properties
+**/captures/
+**/output/
+**/*.ipa
+**/*.apk
+**/*.aab
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.mobileprovision
+**/key.properties
+.native-prepare-*/
