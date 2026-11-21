@@ -8,9 +8,11 @@
       <button class="close-button" type="button" aria-label="关闭记账表单" :disabled="saving" @click="emit('cancel')">×</button>
     </div>
 
+    <p v-if="hiddenIncomeItem" class="notice" role="status">此收入记录已隐藏，请在设置中关闭“隐藏收入”后查看或编辑。</p>
+    <template v-else>
     <fieldset class="kind-field" :disabled="saving">
       <legend>收支类型</legend>
-      <div class="kind-options">
+      <div class="kind-options" :class="{ 'income-hidden': hideIncome }">
         <label v-for="kind in kinds" :key="kind.value" :class="['kind-option', { selected: draft.type === kind.value }]">
           <input v-model="draft.type" type="radio" name="type" :value="kind.value" />
           {{ kind.label }}
@@ -26,7 +28,7 @@
     <div class="editor-grid">
       <label class="field full-width">
         <span>名称 <span aria-hidden="true">*</span></span>
-        <input v-model="draft.item" name="item" placeholder="例如：午餐、工资" autocomplete="off" :disabled="saving" autofocus />
+        <input v-model="draft.item" name="item" :placeholder="hideIncome ? '例如：午餐、日用品' : '例如：午餐、工资'" autocomplete="off" :disabled="saving" autofocus />
       </label>
       <label class="field">
         <span>日期 <span aria-hidden="true">*</span></span>
@@ -65,6 +67,7 @@
       <button class="button button-secondary" type="button" :disabled="saving" @click="emit('cancel')">取消</button>
       <button class="button button-primary" type="submit" :disabled="saving || uncertain || !itemTypes.length || !payTypes.length">{{ saving ? '正在保存…' : uncertain ? '请先核对账目' : '保存账目' }}</button>
     </div>
+    </template>
   </form>
 </template>
 
@@ -73,8 +76,9 @@ import { computed, reactive, ref, useId } from 'vue';
 import { ApiError, type LifeApi } from '../services/api';
 import type { DictionaryOption, ItemDraft, ItemKind, LifeItem } from '../types';
 import { today } from '../utils/time';
+import { isVisibleItemType } from '../utils/incomeVisibility';
 
-const props = defineProps<{ api: LifeApi; item: LifeItem | null; itemTypes: DictionaryOption[]; payTypes: DictionaryOption[] }>();
+const props = withDefaults(defineProps<{ api: LifeApi; item: LifeItem | null; itemTypes: DictionaryOption[]; payTypes: DictionaryOption[]; hideIncome?: boolean }>(), { hideIncome: true });
 const emit = defineEmits<{ saved: []; cancel: [] }>();
 const formElement = ref<HTMLFormElement | null>(null);
 const errorId = useId();
@@ -83,7 +87,8 @@ const saving = ref(false);
 const uncertain = ref(false);
 const submittedItem = ref<ItemDraft | null>(null);
 const amount = ref(props.item ? Number(props.item.money).toFixed(2) : '');
-const kinds: Array<{ value: ItemKind; label: string }> = [{ value: 0, label: '支出' }, { value: 1, label: '收入' }, { value: 99, label: '转出' }, { value: 100, label: '转入' }];
+const allKinds: Array<{ value: ItemKind; label: string }> = [{ value: 0, label: '支出' }, { value: 1, label: '收入' }, { value: 99, label: '转出' }, { value: 100, label: '转入' }];
+const kinds = computed(() => allKinds.filter(kind => isVisibleItemType(kind.value, props.hideIncome)));
 const draft = reactive<ItemDraft>({
   ...(props.item ? { id: props.item.id } : {}),
   item: props.item?.item ?? '',
@@ -96,6 +101,7 @@ const draft = reactive<ItemDraft>({
   address: props.item?.address ?? '',
   imageUrl: props.item?.imageUrl ?? '',
 });
+const hiddenIncomeItem = computed(() => props.hideIncome && (props.item?.type === 1 || draft.type === 1));
 const hasCategory = computed(() => props.itemTypes.some((option) => option.key === draft.itemType));
 const hasPayment = computed(() => props.payTypes.some((option) => option.key === draft.payType));
 
@@ -105,7 +111,7 @@ function invalid(message: string, field: string) {
 }
 
 async function save() {
-  if (saving.value || uncertain.value) return;
+  if (saving.value || uncertain.value || hiddenIncomeItem.value) return;
   error.value = '';
   const moneyText = amount.value.trim();
   const money = Number(moneyText);
@@ -143,6 +149,7 @@ defineExpose({ saving, uncertain, submittedItem });
 .kind-field { padding: 0; margin: 0 0 22px; border: 0; }
 .kind-field legend { font-size: 13px; margin-bottom: 10px; color: #627065; }
 .kind-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.kind-options.income-hidden { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kind-option { position: relative; display: flex; align-items: center; justify-content: center; min-height: 46px; border: 1px solid #dde3d8; border-radius: 12px; color: #58645b; font-size: 14px; cursor: pointer; }
 .kind-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .kind-option:focus-within { outline: 2px solid #526d4e; outline-offset: 2px; }

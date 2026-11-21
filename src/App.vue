@@ -18,8 +18,9 @@
       <p v-if="!canUseItems" class="notice" role="alert">当前账号没有财务管理权限，请联系管理员授权后重新登录。</p>
       <template v-else>
       <p v-if="session.user.isAdmin === 0" class="scope-note">管理员视图 · 明细与统计包含全部用户的数据，与 Web 版范围一致。</p>
-      <ItemsView v-show="activeTab === 'items'" :api="api" :revision="0" @saved="revision += 1" />
-      <StatisticsView v-if="statisticsVisited" v-show="activeTab === 'statistics'" :api="api" :revision="revision" />
+      <ItemsView v-show="activeTab === 'items'" :api="api" :revision="0" :hide-income="hideIncome" @saved="revision += 1" />
+      <StatisticsView v-if="statisticsVisited" v-show="activeTab === 'statistics'" :api="api" :revision="revision" :hide-income="hideIncome" />
+      <SettingsView v-if="activeTab === 'settings'" :hide-income="hideIncome" :save-notice="preferenceSaveNotice" @update:hide-income="setHideIncome" />
       </template>
     </main>
     <main v-else class="login-content">
@@ -35,6 +36,10 @@
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7M3 21h18"/></svg>
         <span>统计</span>
       </button>
+      <button type="button" :class="{ active: activeTab === 'settings' }" :aria-current="activeTab === 'settings' ? 'page' : undefined" @click="activeTab = 'settings'">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>
+        <span>设置</span>
+      </button>
     </nav>
   </div>
 </template>
@@ -44,7 +49,9 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import LoginView from './views/LoginView.vue';
 import ItemsView from './views/ItemsView.vue';
 import StatisticsView from './views/StatisticsView.vue';
+import SettingsView from './views/SettingsView.vue';
 import { createLifeApi, type LifeApi } from './services/api';
+import { readHideIncomePreference, saveHideIncomePreference } from './services/preferences';
 import { resolveServerConfig } from './config/server';
 import type { AppSession } from './types';
 
@@ -54,7 +61,9 @@ const api = shallowRef<LifeApi | null>(null);
 const serverUrl = ref(resolveServerConfig(import.meta.env.VITE_API_BASE_URL, import.meta.env.DEV).serverUrl);
 const sessionGeneration = ref(0);
 const loginNotice = ref('');
-const activeTab = ref<'items' | 'statistics'>('items');
+const activeTab = ref<'items' | 'statistics' | 'settings'>('items');
+const hideIncome = ref(true);
+const preferenceSaveNotice = ref('');
 const statisticsVisited = ref(false);
 const revision = ref(0);
 const online = ref(navigator.onLine);
@@ -68,10 +77,14 @@ function clearSession(message: string) {
   activeTab.value = 'items';
   statisticsVisited.value = false;
   revision.value = 0;
+  hideIncome.value = true;
+  preferenceSaveNotice.value = '';
 }
 
 function startSession(next: AppSession) {
   const generation = ++sessionGeneration.value;
+  hideIncome.value = readHideIncomePreference({ serverUrl: next.serverUrl, userId: next.user.id });
+  preferenceSaveNotice.value = '';
   serverUrl.value = next.serverUrl;
   api.value = createLifeApi({
     ...resolveServerConfig(next.serverUrl, import.meta.env.DEV), token: next.token,
@@ -98,6 +111,14 @@ function logout() {
 function showStatistics() {
   statisticsVisited.value = true;
   activeTab.value = 'statistics';
+}
+
+function setHideIncome(value: boolean) {
+  const current = session.value;
+  if (!current) return;
+  hideIncome.value = value;
+  const saved = saveHideIncomePreference({ serverUrl: current.serverUrl, userId: current.user.id }, value);
+  preferenceSaveNotice.value = saved ? '' : '本次更改已生效，暂时无法保存到本机。';
 }
 
 function updateConnection() { online.value = navigator.onLine; }

@@ -11,11 +11,12 @@
         <label class="field search-field"><span>搜索名称</span><input v-model="draftFilters.item" type="search" placeholder="搜索一笔账目" /></label>
       </div>
       <div class="filter-bottom">
-        <label class="field"><span>收支类型</span><select v-model="draftFilters.type" aria-label="收支类型"><option value="">全部类型</option><option :value="0">支出</option><option :value="1">收入</option><option :value="99">转出</option><option :value="100">转入</option></select></label>
+        <label class="field"><span>账目类型</span><select v-model="draftFilters.type" aria-label="账目类型"><option v-if="!hideIncome" value="">全部类型</option><option :value="0">支出</option><option v-if="!hideIncome" :value="1">收入</option><option :value="99">转出</option><option :value="100">转入</option></select></label>
         <label class="field"><span>账目分类</span><select v-model="draftFilters.itemType" aria-label="账目分类"><option value="">全部分类</option><option v-for="option in itemTypes" :key="option.key" :value="option.key">{{ option.value }}</option></select></label>
         <button class="button button-secondary filter-submit" type="submit">查询</button>
       </div>
     </form>
+    <p v-if="hideIncome" class="income-hidden-note">已隐藏收入，默认显示支出；转账可按类型查询。</p>
 
     <div v-if="dictionaryError" class="error dictionary-error" role="alert"><span>{{ dictionaryError }}</span><button class="button button-secondary" type="button" :disabled="loadingDictionaries" @click="loadDictionaries">{{ loadingDictionaries ? '加载中…' : '重试加载分类' }}</button></div>
     <p v-else-if="loadingDictionaries" class="notice" role="status">正在加载分类和支付方式…</p>
@@ -24,16 +25,16 @@
     <div class="result-heading"><h2>{{ appliedMonthLabel }}</h2><button class="refresh-button" type="button" :disabled="loading" @click="refreshCurrent">{{ loading ? '刷新中…' : '刷新' }}</button></div>
     <p v-if="loading" class="empty" role="status">正在读取云端账目…</p>
     <div v-else-if="listError" class="error" role="alert"><p>{{ listError }}</p><button class="button button-secondary" type="button" @click="loadItems">重试查询</button></div>
-    <template v-else-if="result">
-      <div class="summary-grid" aria-label="当前筛选范围合计">
+    <template v-else-if="result && resultMode === hideIncome">
+      <div class="summary-grid" :class="{ 'income-hidden': hideIncome }" aria-label="当前筛选范围合计">
         <div class="summary-box"><span>支出</span><strong>{{ money(result.expense) }}</strong></div>
-        <div class="summary-box income"><span>收入</span><strong>{{ money(result.income) }}</strong></div>
+        <div v-if="!hideIncome" class="summary-box income"><span>收入</span><strong>{{ money(result.income) }}</strong></div>
       </div>
       <div v-if="result.transferOut || result.transferIn" class="transfer-summary">转出 {{ money(result.transferOut) }} <span aria-hidden="true">·</span> 转入 {{ money(result.transferIn) }}<span>转账单独统计</span></div>
       <p class="result-count">共 {{ result.count }} 笔 · 合计覆盖全部查询结果</p>
-      <div v-if="result.items.length === 0" class="empty"><div class="empty-icon" aria-hidden="true">↗</div><h3>这一页生活，还等你记录</h3><p>当前查询条件下没有账目。</p><button class="button button-primary" type="button" :disabled="!dictionariesReady" @click="openEditor(null)">记下第一笔</button></div>
+      <div v-if="visibleItems.length === 0" class="empty"><div class="empty-icon" aria-hidden="true">↗</div><h3>这一页生活，还等你记录</h3><p>当前查询条件下没有账目。</p><button class="button button-primary" type="button" :disabled="!dictionariesReady" @click="openEditor(null)">记下第一笔</button></div>
       <div v-else class="item-list">
-        <button v-for="item in result.items" :key="item.id" class="item-card" type="button" :aria-label="`${item.item}，${kindLabel(item.type)} ${money(item.money)}，查看详情`" @click="openDetails(item.id)">
+        <button v-for="item in visibleItems" :key="item.id" class="item-card" type="button" :aria-label="`${item.item}，${kindLabel(item.type)} ${money(item.money)}，查看详情`" @click="openDetails(item.id)">
           <span :class="['item-kind-icon', { income: item.type === 1 || item.type === 100 }]" aria-hidden="true">{{ item.type === 1 || item.type === 100 ? '↙' : '↗' }}</span>
           <span class="item-main"><strong>{{ item.item }}</strong><span>{{ categoryLabel(item.itemType) }} <span aria-hidden="true">·</span> {{ item.itemDate }}</span><span v-if="item.remark" class="item-remark">{{ item.remark }}</span></span>
           <span class="item-amount"><strong :class="{ income: item.type === 1 || item.type === 100 }">{{ item.type === 1 || item.type === 100 ? '+' : '−' }}{{ money(item.money) }}</strong><span>{{ kindLabel(item.type) }}</span></span>
@@ -44,18 +45,18 @@
     </template>
 
     <dialog ref="editorDialog" class="ledger-dialog" aria-label="记账表单" @cancel.prevent="cancelEditor">
-      <ItemEditor v-if="editorOpen" :key="editorKey" ref="editorComponent" :api="api" :item="editingItem" :item-types="itemTypes" :pay-types="payTypes" @cancel="cancelEditor" @saved="itemSaved" />
+      <ItemEditor v-if="editorOpen" :key="editorKey" ref="editorComponent" :api="api" :item="editingItem" :item-types="itemTypes" :pay-types="payTypes" :hide-income="hideIncome" @cancel="cancelEditor" @saved="itemSaved" />
     </dialog>
 
     <dialog ref="detailsDialog" class="ledger-dialog detail-dialog" aria-labelledby="detail-title" @cancel.prevent="closeDetails">
       <div class="detail-heading"><h2 id="detail-title">账目详情</h2><button class="close-button" type="button" aria-label="关闭账目详情" :disabled="deleting" @click="closeDetails">×</button></div>
       <p v-if="loadingDetails" class="empty" role="status">正在读取详情…</p>
       <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
-      <template v-if="selectedItem">
-        <div class="detail-hero"><span>{{ kindLabel(selectedItem.type) }}</span><strong>{{ money(selectedItem.money) }}</strong><h3>{{ selectedItem.item }}</h3></div>
-        <dl class="detail-fields"><div><dt>日期</dt><dd>{{ selectedItem.itemDate }}</dd></div><div><dt>分类</dt><dd>{{ categoryLabel(selectedItem.itemType) }}</dd></div><div><dt>支付方式</dt><dd>{{ paymentLabel(selectedItem.payType) }}</dd></div><div v-if="selectedItem.remark"><dt>备注</dt><dd>{{ selectedItem.remark }}</dd></div><div v-if="selectedItem.address"><dt>地点</dt><dd>{{ selectedItem.address }}</dd></div><div v-if="selectedItem.createUser"><dt>记录人</dt><dd>{{ selectedItem.createUser }}</dd></div><div v-if="selectedItem.updateTime"><dt>更新于</dt><dd>{{ selectedItem.updateTime }}</dd></div></dl>
+      <template v-if="visibleSelectedItem">
+        <div class="detail-hero"><span>{{ kindLabel(visibleSelectedItem.type) }}</span><strong>{{ money(visibleSelectedItem.money) }}</strong><h3>{{ visibleSelectedItem.item }}</h3></div>
+        <dl class="detail-fields"><div><dt>日期</dt><dd>{{ visibleSelectedItem.itemDate }}</dd></div><div><dt>分类</dt><dd>{{ categoryLabel(visibleSelectedItem.itemType) }}</dd></div><div><dt>支付方式</dt><dd>{{ paymentLabel(visibleSelectedItem.payType) }}</dd></div><div v-if="visibleSelectedItem.remark"><dt>备注</dt><dd>{{ visibleSelectedItem.remark }}</dd></div><div v-if="visibleSelectedItem.address"><dt>地点</dt><dd>{{ visibleSelectedItem.address }}</dd></div><div v-if="visibleSelectedItem.createUser"><dt>记录人</dt><dd>{{ visibleSelectedItem.createUser }}</dd></div><div v-if="visibleSelectedItem.updateTime"><dt>更新于</dt><dd>{{ visibleSelectedItem.updateTime }}</dd></div></dl>
         <div v-if="deletionUncertain" class="detail-actions"><button class="button button-secondary" type="button" @click="closeAndRefresh">关闭并核对账目</button></div>
-        <template v-else-if="confirmDelete"><p class="error">确定删除「{{ selectedItem.item }}」？删除后无法恢复，Web 版也会同时删除。</p><div class="detail-actions"><button class="button button-secondary" type="button" :disabled="deleting" @click="confirmDelete = false">保留账目</button><button class="button button-danger" type="button" :disabled="deleting" @click="deleteSelected">{{ deleting ? '删除中…' : '确定删除' }}</button></div></template>
+        <template v-else-if="confirmDelete"><p class="error">确定删除「{{ visibleSelectedItem.item }}」？删除后无法恢复，Web 版也会同时删除。</p><div class="detail-actions"><button class="button button-secondary" type="button" :disabled="deleting" @click="confirmDelete = false">保留账目</button><button class="button button-danger" type="button" :disabled="deleting" @click="deleteSelected">{{ deleting ? '删除中…' : '确定删除' }}</button></div></template>
         <div v-else class="detail-actions"><button class="button button-secondary" type="button" @click="confirmDelete = true">删除账目</button><button class="button button-primary" type="button" :disabled="!dictionariesReady" @click="editSelected">编辑账目</button></div>
       </template>
     </dialog>
@@ -68,14 +69,16 @@ import ItemEditor from '../components/ItemEditor.vue';
 import { ApiError, type LifeApi } from '../services/api';
 import type { DictionaryOption, ItemFilters, ItemKind, ItemList, LifeItem } from '../types';
 import { monthRange, today } from '../utils/time';
+import { isVisibleItemType, itemFilterType } from '../utils/incomeVisibility';
 
-const props = defineProps<{ api: LifeApi; revision: number }>();
+const props = withDefaults(defineProps<{ api: LifeApi; revision: number; hideIncome?: boolean }>(), { hideIncome: true });
 const emit = defineEmits<{ saved: [] }>();
-const draftFilters = reactive<{ month: string; item: string; type: ItemKind | ''; itemType: string }>({ month: today().slice(0, 7), item: '', type: '', itemType: '' });
+const draftFilters = reactive<{ month: string; item: string; type: ItemKind | ''; itemType: string }>({ month: today().slice(0, 7), item: '', type: itemFilterType('', props.hideIncome), itemType: '' });
 const initialRange = monthRange(draftFilters.month);
-const filters = reactive<ItemFilters>({ page: 1, limit: 20, itemDateStart: initialRange.start, itemDateEnd: initialRange.end });
+const filters = reactive<ItemFilters>({ page: 1, limit: 20, type: draftFilters.type, itemDateStart: initialRange.start, itemDateEnd: initialRange.end });
 const appliedMonth = ref(draftFilters.month);
 const result = ref<ItemList | null>(null);
+const resultMode = ref(props.hideIncome);
 const loading = ref(false);
 const listError = ref('');
 const successMessage = ref('');
@@ -100,6 +103,8 @@ let dictionaryRequest = 0;
 let detailRequest = 0;
 let alive = true;
 const dictionariesReady = computed(() => itemTypes.value.length > 0 && payTypes.value.length > 0 && !loadingDictionaries.value && !dictionaryError.value);
+const visibleItems = computed(() => (result.value?.items || []).filter(item => isVisibleItemType(item.type, props.hideIncome)));
+const visibleSelectedItem = computed(() => selectedItem.value && isVisibleItemType(selectedItem.value.type, props.hideIncome) ? selectedItem.value : null);
 const totalPages = computed(() => Math.max(1, Math.ceil((result.value?.count ?? 0) / filters.limit)));
 const appliedMonthLabel = computed(() => `${appliedMonth.value.slice(0, 4)} 年 ${Number(appliedMonth.value.slice(5))} 月`);
 const money = (value: number) => new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
@@ -127,17 +132,21 @@ async function loadDictionaries() {
 
 async function loadItems() {
   const request = ++listRequest;
+  const api = props.api;
+  const hideIncome = props.hideIncome;
+  const query = { ...filters, type: itemFilterType(filters.type, hideIncome) };
   loading.value = true;
   listError.value = '';
   result.value = null;
   try {
-    const response = await props.api.listItems({ ...filters });
-    if (!alive || request !== listRequest) return;
+    const response = await api.listItems(query);
+    if (!alive || request !== listRequest || api !== props.api || hideIncome !== props.hideIncome) return;
     if (!response.items.length && response.count > 0 && filters.page > 1) {
       filters.page = Math.max(1, Math.ceil(response.count / filters.limit));
       await loadItems();
       return;
     }
+    resultMode.value = hideIncome;
     result.value = response;
   } catch (cause) {
     if (alive && request === listRequest) listError.value = messageFor(cause, '读取失败，请检查网络后重试。');
@@ -149,6 +158,7 @@ async function loadItems() {
 function applyFilters() {
   if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(draftFilters.month)) return;
   const range = monthRange(draftFilters.month);
+  draftFilters.type = itemFilterType(draftFilters.type, props.hideIncome);
   Object.assign(filters, { page: 1, item: draftFilters.item.trim(), type: draftFilters.type, itemType: draftFilters.itemType, itemDateStart: range.start, itemDateEnd: range.end });
   appliedMonth.value = draftFilters.month;
   successMessage.value = '';
@@ -159,7 +169,7 @@ function changePage(offset: number) { filters.page += offset; void loadItems(); 
 function refreshCurrent() { successMessage.value = ''; void loadItems(); }
 
 async function openEditor(item: LifeItem | null) {
-  if (!dictionariesReady.value) return;
+  if (!dictionariesReady.value || (item && !isVisibleItemType(item.type, props.hideIncome))) return;
   editingItem.value = item;
   editorKey.value += 1;
   editorOpen.value = true;
@@ -174,11 +184,18 @@ function cancelEditor() {
   editorDialog.value?.close();
   editorOpen.value = false;
   if (needsVerification) {
+    if (submitted && !isVisibleItemType(submitted.type, props.hideIncome)) {
+      successMessage.value = '保存结果尚未确认，请先在设置中关闭隐藏收入后核对账目，避免重复记账。';
+      emit('saved');
+      void loadItems();
+      return;
+    }
     if (submitted) {
       const month = submitted.itemDate.slice(0, 7);
       const range = monthRange(month);
-      Object.assign(draftFilters, { month, item: submitted.item, type: '', itemType: '' });
-      Object.assign(filters, { page: 1, item: submitted.item, type: '', itemType: '', itemDateStart: range.start, itemDateEnd: range.end });
+      const type = itemFilterType(submitted.type, props.hideIncome);
+      Object.assign(draftFilters, { month, item: submitted.item, type, itemType: '' });
+      Object.assign(filters, { page: 1, item: submitted.item, type, itemType: '', itemDateStart: range.start, itemDateEnd: range.end });
       appliedMonth.value = month;
     }
     successMessage.value = '保存结果尚未确认，已按本次日期与名称查询，请核对明细，避免重复记账。';
@@ -207,7 +224,10 @@ async function openDetails(id: number) {
   detailsDialog.value?.showModal();
   try {
     const item = await props.api.getItem(id);
-    if (alive && request === detailRequest) selectedItem.value = item;
+    if (alive && request === detailRequest) {
+      if (isVisibleItemType(item.type, props.hideIncome)) selectedItem.value = item;
+      else detailError.value = '当前记录已隐藏，可在设置中关闭隐藏收入后查看。';
+    }
   } catch (cause) {
     if (alive && request === detailRequest) detailError.value = messageFor(cause, '详情加载失败，请关闭后重试。');
   } finally {
@@ -231,8 +251,8 @@ function closeDetails() {
 }
 
 function editSelected() {
-  if (!selectedItem.value) return;
-  const item = selectedItem.value;
+  if (!visibleSelectedItem.value) return;
+  const item = visibleSelectedItem.value;
   closeDetails();
   void openEditor(item);
 }
@@ -242,8 +262,8 @@ function closeAndRefresh() {
 }
 
 async function deleteSelected() {
-  if (!selectedItem.value || deleting.value || deletionUncertain.value) return;
-  const id = selectedItem.value.id;
+  if (!visibleSelectedItem.value || deleting.value || deletionUncertain.value) return;
+  const id = visibleSelectedItem.value.id;
   const api = props.api;
   deleting.value = true;
   detailError.value = '';
@@ -266,6 +286,23 @@ async function deleteSelected() {
   }
 }
 
+watch(() => props.hideIncome, hideIncome => {
+  draftFilters.type = itemFilterType('', hideIncome);
+  Object.assign(filters, { page: 1, type: draftFilters.type });
+  result.value = null;
+  successMessage.value = '';
+  if (hideIncome) {
+    if (!deleting.value && (loadingDetails.value || (selectedItem.value && !isVisibleItemType(selectedItem.value.type, true)))) {
+      detailRequest += 1;
+      loadingDetails.value = false;
+      detailsDialog.value?.close();
+      selectedItem.value = null;
+      confirmDelete.value = false;
+    }
+    if (editingItem.value && !isVisibleItemType(editingItem.value.type, true) && !editorComponent.value?.saving) cancelEditor();
+  }
+  void loadItems();
+}, { flush: 'sync' });
 watch(() => props.revision, () => { void loadItems(); });
 watch(() => props.api, () => {
   dictionaryRequest += 1;
@@ -296,6 +333,7 @@ onBeforeUnmount(() => { alive = false; listRequest += 1; dictionaryRequest += 1;
 .add-button { flex-shrink: 0; white-space: nowrap; min-height: 46px; padding: 0 17px; }
 .add-button > span { font-size: 21px; margin-right: 2px; }
 .filters { padding: 18px; margin-bottom: 16px; }
+.income-hidden-note { margin: 0 0 16px; color: #7c8479; font-size: 12px; line-height: 1.6; }
 .filter-top, .filter-bottom { display: grid; gap: 12px; align-items: end; }
 .filter-top { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); margin-bottom: 13px; }
 .filter-bottom { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
@@ -306,6 +344,7 @@ onBeforeUnmount(() => { alive = false; listRequest += 1; dictionaryRequest += 1;
 .result-heading h2 { font-size: 18px; margin: 0; }
 .refresh-button { min-width: 60px; min-height: 44px; background: transparent; color: #5b7151; border: 0; font-size: 13px; font-weight: 600; }
 .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.summary-grid.income-hidden { grid-template-columns: 1fr; }
 .summary-box { padding: 17px 18px; border-radius: 16px; background: #f1e9dd; min-width: 0; }
 .summary-box > span { display: block; font-size: 12px; color: #8b6d52; margin-bottom: 9px; }
 .summary-box > strong { font-size: clamp(19px, 5.5vw, 27px); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

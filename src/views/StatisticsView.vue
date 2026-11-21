@@ -3,7 +3,7 @@
     <div class="page-heading statistics-heading">
       <div>
         <p class="section-eyebrow">看见每一笔生活</p>
-        <h2 id="statistics-title">收支统计</h2>
+        <h2 id="statistics-title">{{ hideIncome ? '支出统计' : '收支统计' }}</h2>
       </div>
       <button class="button button-secondary refresh-button" type="button" :disabled="loading" @click="loadReports">
         {{ loading ? '查询中…' : '刷新' }}
@@ -25,7 +25,7 @@
       </label>
     </div>
 
-    <p class="statistics-note">统计与 Web 版共用云端数据，转入和转出不计入收入、支出及结余。</p>
+    <p class="statistics-note">{{ hideIncome ? '统计与 Web 版共用云端数据，转入和转出不计入支出。' : '统计与 Web 版共用云端数据，转入和转出不计入收入、支出及结余。' }}</p>
 
     <div v-if="loading" class="panel loading-panel" role="status" aria-live="polite">
       <span class="loading-dot" aria-hidden="true"></span>
@@ -42,21 +42,21 @@
       <section class="month-overview" aria-labelledby="month-overview-title">
         <div class="overview-topline">
           <h3 id="month-overview-title">{{ selectedYear }} 年 {{ Number(selectedMonth) }} 月</h3>
-          <span>月度收支</span>
+          <span>{{ hideIncome ? '月度支出' : '月度收支' }}</span>
         </div>
-        <p class="balance-label">本月结余</p>
-        <p class="balance-amount">{{ formatMoney(monthBalance) }}</p>
-        <dl class="month-amounts">
+        <p class="balance-label">{{ hideIncome ? '本月支出' : '本月结余' }}</p>
+        <p class="balance-amount">{{ formatMoney(hideIncome ? display.monthExpense : (display.monthBalance ?? 0)) }}</p>
+        <dl v-if="!hideIncome" class="month-amounts">
           <div>
             <dt><span class="amount-marker income-marker" aria-hidden="true"></span>收入</dt>
-            <dd>{{ formatMoney(monthIncome) }}</dd>
+            <dd>{{ formatMoney(display.monthIncome ?? 0) }}</dd>
           </div>
           <div>
             <dt><span class="amount-marker expense-marker" aria-hidden="true"></span>支出</dt>
             <dd>{{ formatMoney(totalReport.monthTotal) }}</dd>
           </div>
         </dl>
-        <p v-if="monthIncome === 0 && totalReport.monthTotal === 0" class="month-empty">本月暂无收入或支出记录</p>
+        <p v-if="!display.hasMonthData" class="month-empty">{{ hideIncome ? '本月暂无支出记录' : '本月暂无收入或支出记录' }}</p>
       </section>
 
       <section class="panel annual-panel" aria-labelledby="annual-title">
@@ -64,37 +64,37 @@
           <h3 id="annual-title">{{ selectedYear }} 年概览</h3>
           <span class="subtle-label">整年汇总</span>
         </div>
-        <dl class="annual-amounts">
-          <div>
+        <dl class="annual-amounts" :class="{ 'expense-only': hideIncome }">
+          <div v-if="!hideIncome">
             <dt>全年收入</dt>
-            <dd class="income-text">{{ formatMoney(totalReport.yearIncomeTotal) }}</dd>
+            <dd class="income-text">{{ formatMoney(display.yearIncome ?? 0) }}</dd>
           </div>
           <div>
             <dt>全年支出</dt>
             <dd class="expense-text">{{ formatMoney(totalReport.yearTotal) }}</dd>
           </div>
-          <div>
+          <div v-if="!hideIncome">
             <dt>全年结余</dt>
-            <dd>{{ formatMoney(totalReport.yearIncomeTotal - totalReport.yearTotal) }}</dd>
+            <dd>{{ formatMoney(display.yearBalance ?? 0) }}</dd>
           </div>
         </dl>
       </section>
 
       <section class="panel trend-panel" aria-labelledby="trend-title">
         <div class="panel-heading trend-heading">
-          <h3 id="trend-title">每月收支</h3>
+          <h3 id="trend-title">{{ hideIncome ? '每月支出' : '每月收支' }}</h3>
           <div class="chart-legend" aria-hidden="true">
-            <span><i class="legend-dot income-fill"></i>收入</span>
+            <span v-if="!hideIncome"><i class="legend-dot income-fill"></i>收入</span>
             <span><i class="legend-dot expense-fill"></i>支出</span>
           </div>
         </div>
-        <p class="statistics-note chart-description">{{ selectedYear }} 年 12 个月的收入与支出，金额单位：元。</p>
-        <div v-if="!hasYearData" class="empty chart-empty">这一年暂无收入或支出记录</div>
-        <ol v-else class="trend-list" aria-label="每月收入与支出金额">
-          <li v-for="month in trendRows" :key="month.index" class="trend-row" :class="{ 'selected-trend-row': month.index === monthIndex }">
+        <p class="statistics-note chart-description">{{ selectedYear }} 年 12 个月的{{ hideIncome ? '支出' : '收入与支出' }}，金额单位：元。</p>
+        <div v-if="!display.hasYearData" class="empty chart-empty">{{ hideIncome ? '这一年暂无支出记录' : '这一年暂无收入或支出记录' }}</div>
+        <ol v-else class="trend-list" :aria-label="hideIncome ? '每月支出金额' : '每月收入与支出金额'">
+          <li v-for="month in display.trendRows" :key="month.index" class="trend-row" :class="{ 'selected-trend-row': month.index === monthIndex }">
             <span class="trend-month">{{ month.index + 1 }} 月</span>
             <div class="trend-series">
-              <div class="bar-line">
+              <div v-if="!hideIncome && month.income !== undefined" class="bar-line">
                 <span class="bar-track" aria-hidden="true"><span class="bar-fill income-fill" :style="{ width: barWidth(month.income) }"></span></span>
                 <span class="bar-amount"><span class="visually-hidden">收入 </span>{{ formatMoney(month.income) }}</span>
               </div>
@@ -136,8 +136,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { LifeApi } from '../services/api';
 import { formatMoney, today } from '../utils/time';
+import { statisticsDisplay } from '../utils/statisticsDisplay';
 
-const props = defineProps<{ api: LifeApi; revision: number }>();
+const props = withDefaults(defineProps<{ api: LifeApi; revision: number; hideIncome?: boolean }>(), { hideIncome: true });
 
 type TotalReport = Awaited<ReturnType<LifeApi['getTotalReport']>>;
 type MonthlyReport = Awaited<ReturnType<LifeApi['getMonthlyReport']>>;
@@ -156,20 +157,12 @@ const categoryReport = ref<CategoryReport | null>(null);
 let requestVersion = 0;
 
 const monthIndex = computed(() => Number(selectedMonth.value) - 1);
-const monthIncome = computed(() => monthlyReport.value?.income[monthIndex.value] || 0);
-const monthBalance = computed(() => monthIncome.value - (totalReport.value?.monthTotal || 0));
-const trendRows = computed(() => Array.from({ length: 12 }, (_, index) => ({
-  index,
-  income: monthlyReport.value?.income[index] || 0,
-  expense: monthlyReport.value?.expense[index] || 0,
-})));
-const hasYearData = computed(() => trendRows.value.some((month) => month.income !== 0 || month.expense !== 0));
-const trendMaximum = computed(() => Math.max(1, ...trendRows.value.flatMap((month) => [month.income, month.expense])));
+const display = computed(() => statisticsDisplay(totalReport.value, monthlyReport.value, monthIndex.value, props.hideIncome));
 const categories = computed(() => [...(categoryReport.value || [])].filter((category) => category.amount !== 0).sort((a, b) => b.amount - a.amount));
 const categoryPalette = ['#237e6c', '#d08a47', '#679c89', '#a5b58b', '#798daf', '#b78291'];
 
 function barWidth(amount: number) {
-  return `${Math.max(0, Math.min(100, amount / trendMaximum.value * 100))}%`;
+  return `${Math.max(0, Math.min(100, amount / display.value.trendMaximum * 100))}%`;
 }
 
 function categoryPercentage(amount: number) {
@@ -252,6 +245,7 @@ onBeforeUnmount(() => { requestVersion += 1; });
 .panel-heading h3 { margin: 0; color: #2b3c31; font-size: 16px; font-weight: 650; }
 .subtle-label { color: #89938b; font-size: 11px; }
 .annual-amounts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 13px; margin: 22px 0 2px; }
+.annual-amounts.expense-only { grid-template-columns: 1fr; }
 .annual-amounts dt { color: #7a837b; font-size: 11px; }
 .annual-amounts dd { margin: 8px 0 0; color: #33483b; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .annual-amounts .income-text { color: #287761; }
