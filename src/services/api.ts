@@ -23,10 +23,6 @@ interface ApiOptions {
   onUnauthorized?: () => void;
 }
 
-export interface LoginConfiguration {
-  turnstile: { enabled: boolean; siteKey: string };
-}
-
 type JsonBody = Record<string, unknown>;
 const uncertainMessage = '提交结果尚未确认，请先刷新账目明细核对，勿重复提交。';
 
@@ -120,7 +116,7 @@ export function createLifeApi(options: ApiOptions) {
           if (typeof problem?.message === 'string') reason = problem.message;
         } catch { /* Gateways may return HTML errors. Use safe status fallbacks. */ }
         const fallback = response.status === 401 ? (bearerToken ? '登录已过期，请重新登录。' : '用户名或密码错误。')
-          : response.status === 403 ? '没有此操作的权限，或安全验证未通过。'
+          : response.status === 403 ? '没有此操作的权限。'
             : response.status === 429 ? '请求过于频繁，请稍后重试。'
               : response.status === 503 ? '服务暂不可用，请稍后重试。'
                 : `请求失败（${response.status}），请稍后重试。`;
@@ -165,19 +161,9 @@ export function createLifeApi(options: ApiOptions) {
   }
 
   return {
-    async getLoginConfiguration(): Promise<LoginConfiguration> {
-      const result = await request('/auth/config', {}, '');
-      if (Number(result.status) !== 200) throw new ApiError('登录安全配置不完整，请联系服务管理员。');
-      const data = object(result.data);
-      const config = object(data.turnstile);
-      if (typeof config.enabled !== 'boolean' || typeof config.siteKey !== 'string' || (config.enabled && !config.siteKey)) {
-        throw new ApiError('登录安全配置不完整，请联系服务管理员。');
-      }
-      return { turnstile: { enabled: config.enabled, siteKey: config.siteKey } };
-    },
-    async login(username: string, password: string, turnstileToken?: string): Promise<AppSession> {
+    async login(username: string, password: string): Promise<AppSession> {
       const result = await request('/auth/login', {
-        method: 'POST', body: JSON.stringify({ username, password, ...(turnstileToken ? { turnstileToken } : {}) }),
+        method: 'POST', body: JSON.stringify({ username, password }),
       }, '');
       if (result.data !== true || typeof result.message !== 'string' || !result.message) {
         throw new ApiError(result.data === false ? '用户名或密码错误。' : '登录响应格式不正确。');

@@ -9,7 +9,7 @@ iPhone / Android App ── HTTPS ── life-api ── MySQL
 电脑 life-web       ── HTTPS ──────┘     └── Redis 登录会话
 ```
 
-- 密码登录、Turnstile 安全验证、退出和登录过期处理。
+- 密码登录、退出和登录过期处理。
 - 云端新增记账、账目明细、筛选、分页、查看、修改和删除。
 - 年度/月度收入支出、结余、12 个月趋势和月度支出分类。
 - 分类和支付方式读取服务端数据字典，统计沿用 Web 版的接口与口径。
@@ -94,7 +94,6 @@ npm run dev:android
 
 | 功能 | 接口 |
 | --- | --- |
-| 登录安全配置 / 验证页面 | `GET /life/auth/config`、`GET /life/auth/challenge` |
 | 登录 / 当前用户 / 退出 | `POST /life/auth/login`、`GET /life/auth/info`、`POST /life/auth/logout` |
 | 分类 / 支付方式 | `GET /life/dictionaries/options/query?type=item_type`、`type=pay_type` |
 | 明细 / 单条详情 | `GET /life/items/query`、`GET /life/items/query/:id` |
@@ -103,20 +102,16 @@ npm run dev:android
 
 请求使用 JSON 和 `Authorization: Bearer ...`。客户端同时检查 HTTP 状态和现有 API 的业务 `status`；部分字典接口成功时没有 `status`。金额可能由 MySQL 返回字符串，客户端统一转换用于展示。
 
-登录前读取后端安全配置；启用 Turnstile 时，用户完成验证后才能提交密码。登录请求在 JSON 中携带 `turnstileToken`，后端必须验证该 token。没有可用安全配置、验证加载失败或过期时不会降级跳过验证。账号、密码和 token 都不会放入验证页面 URL 或持久化存储。
+填写服务地址、账号和密码即可登录；客户端先校验地址，再直接通过 JSON 提交账号密码，不加载外部验证脚本或验证页面。密码和会话凭证不会放入 URL 或持久化存储。
 
-验证组件使用 API 服务自身 HTTPS 地址下的 `/life/auth/challenge` iframe，保持 Turnstile 所在页面拥有可配置的真实域名，同时避免把自定义后端脚本直接执行在 App 主页面中。iframe 使用 sandbox，消息必须同时匹配该 iframe 的 window、API origin 和每次生成的随机 channel。切换服务地址、重试或登录结束会清除旧 token；页面销毁后移除监听器。iOS 对 `capacitor://localhost` 使用明确来源，其他任意 `null` 来源不被接受。
-
-部署后端时，需要将 API 验证页面域名加入 Turnstile 域名配置，并在后端允许实际客户端来源（CORS 与验证页面 CSP `frame-ancestors` 都要匹配）：iOS 为 `capacitor://localhost`，Android 为 `https://localhost`，浏览器开发如 `http://localhost:5174`。后端若位于反向代理路径前缀下，两个验证页面资源及其脚本也必须保留同一前缀。不要给验证页面加 `X-Frame-Options: DENY`，也不要对 JSON API 返回 WAF 的 HTML 交互验证页。没有为整个 App 开启任意外部主页面导航、明文流量或关闭证书验证。
-
-只有拥有财务管理 `item` 权限的普通用户或管理员可以进入 App 的记账与统计页面；权限与数据归属仍由服务端逐请求检查。HTTP 403 显示权限或安全验证错误，429 提示稍后重试，503 提示服务暂不可用；这些错误不会误清除仍有效的登录。登录请求的 401 也不会触发另一个已登录会话的过期处理。
+只有拥有财务管理 `item` 权限的普通用户或管理员可以进入 App 的记账与统计页面；权限与数据归属仍由服务端逐请求检查。HTTP 403 显示权限错误，429 提示稍后重试，503 提示服务暂不可用；这些错误不会误清除仍有效的登录。登录请求的 401 也不会触发另一个已登录会话的过期处理。
 
 后续云端接入需要：
 
 1. 在阿里云部署现有 `life-api` Node 服务，配置其 MySQL 和 Redis 连接。当前登录依赖 Redis，不是只安装 MySQL 即可使用。
 2. 核对现有数据库表结构、数据字典和迁移数据，用真实业务账号验证权限及统计口径。
 3. 配置 HTTPS 反向代理。浏览器请求需允许开发地址，打包后的 WebView 来源分别为 iOS `capacitor://localhost` 和 Android `https://localhost`；如收紧 CORS，保留对应来源及 `Authorization`、`Content-Type` 请求头。
-4. 与 `life-api` 的安全分支配套部署，配置 Turnstile、服务端限流、权限及会话撤销；核对旧密码迁移行为后再开放公网。客户端验证不能替代后端保护。
+4. 与 `life-api` 的安全分支配套部署，配置服务端限流、权限及会话撤销；核对旧密码迁移行为后再开放公网。客户端校验不能替代后端保护。
 5. 将 `.env.local` 配成真实 API 地址，再执行云端接口联调及 iPhone / Android 真机验证。
 
 普通用户的数据范围由 `life-api` 决定；管理员在现有 Web/API 中默认可查看所有用户数据，App 沿用该规则。转出和转入保留独立类型，不计入统计中的收入、支出和结余。

@@ -16,24 +16,16 @@
         <label class="field"><span>服务地址</span><input v-model.trim="address" name="serverUrl" type="url" inputmode="url" autocomplete="url" autocapitalize="none" autocorrect="off" placeholder="https://api.example.com" :disabled="loading" /></label>
         <p>填写 Life 服务的 HTTPS 地址。</p>
       </details>
-      <p v-if="configLoading" class="verification-status" role="status">正在连接登录服务…</p>
-      <div v-if="configError" class="verification-status">
-        <p class="error" role="alert">{{ configError }}</p>
-        <button class="retry-connection" type="button" :disabled="loading" @click="loadConfiguration">重新连接</button>
-      </div>
-      <TurnstileChallenge v-if="configuration?.turnstile.enabled" :key="challengeGeneration" :server-url="configuredAddress" @token="turnstileToken = $event" />
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button class="button button-primary login-submit" type="submit" :disabled="loading || !configuration || (configuration.turnstile.enabled && !turnstileToken)">{{ loading ? '正在登录…' : '登录 Life' }}<span aria-hidden="true">↗</span></button>
+      <button class="button button-primary login-submit" type="submit" :disabled="loading">{{ loading ? '正在登录…' : '登录 Life' }}<span aria-hidden="true">↗</span></button>
       <p class="login-footnote">电脑与手机，共享同一份生活记录。</p>
     </form>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, shallowRef, watch } from 'vue';
-import TurnstileChallenge from '../components/TurnstileChallenge.vue';
-import { createLifeApi, normalizeServerUrl } from '../services/api';
-import type { LoginConfiguration } from '../services/api';
+import { ref } from 'vue';
+import { createLifeApi } from '../services/api';
 import type { AppSession } from '../types';
 
 const props = defineProps<{ serverUrl: string; notice: string }>();
@@ -43,68 +35,19 @@ const username = ref('');
 const password = ref('');
 const loading = ref(false);
 const error = ref('');
-const configuration = shallowRef<LoginConfiguration | null>(null);
-const configLoading = ref(false);
-const configError = ref('');
-const configuredAddress = ref('');
-const turnstileToken = ref('');
-const challengeGeneration = ref(0);
-let configGeneration = 0;
-let configTimer: ReturnType<typeof setTimeout> | undefined;
-
-async function loadConfiguration() {
-  clearTimeout(configTimer);
-  const generation = ++configGeneration;
-  configuration.value = null;
-  turnstileToken.value = '';
-  configError.value = '';
-  configuredAddress.value = '';
-  challengeGeneration.value += 1;
-  if (!address.value) { configLoading.value = false; return; }
-  configLoading.value = true;
-  try {
-    const normalized = normalizeServerUrl(address.value, import.meta.env.DEV);
-    const next = await createLifeApi({ serverUrl: normalized, allowHttp: import.meta.env.DEV }).getLoginConfiguration();
-    if (generation !== configGeneration) return;
-    configuredAddress.value = normalized;
-    configuration.value = next;
-  } catch (cause) {
-    if (generation === configGeneration) configError.value = cause instanceof Error ? cause.message : '无法读取登录配置，请重新连接。';
-  } finally {
-    if (generation === configGeneration) configLoading.value = false;
-  }
-}
-
-watch(address, () => {
-  // Invalidate immediately, before the debounce, so a token for a previous
-  // server can never accompany credentials sent to a newly entered address.
-  configGeneration += 1;
-  clearTimeout(configTimer);
-  configuration.value = null;
-  turnstileToken.value = '';
-  configError.value = '';
-  configLoading.value = !!address.value;
-  configTimer = setTimeout(() => { void loadConfiguration(); }, 400);
-}, { immediate: true });
-
-onBeforeUnmount(() => { configGeneration += 1; clearTimeout(configTimer); });
 
 async function submit() {
   if (loading.value) return;
   error.value = '';
   if (!username.value || !password.value) { error.value = '请填写账号和密码。'; return; }
-  if (!configuration.value || configLoading.value) { error.value = '请先连接登录服务。'; return; }
-  if (configuration.value.turnstile.enabled && !turnstileToken.value) { error.value = '请先完成安全验证。'; return; }
   loading.value = true;
   try {
-    const api = createLifeApi({ serverUrl: configuredAddress.value, allowHttp: import.meta.env.DEV });
-    emit('loggedIn', await api.login(username.value, password.value, turnstileToken.value));
+    const api = createLifeApi({ serverUrl: address.value, allowHttp: import.meta.env.DEV });
+    emit('loggedIn', await api.login(username.value, password.value));
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '登录失败，请稍后重试。';
   } finally {
     password.value = '';
-    turnstileToken.value = '';
-    challengeGeneration.value += 1;
     loading.value = false;
   }
 }
@@ -130,8 +73,6 @@ async function submit() {
 .login-submit { display: flex; justify-content: space-between; width: 100%; min-height: 52px; }
 .login-submit span { font-size: 20px; }
 .login-footnote { margin: 0; text-align: center; font-size: 12px; color: #7c8775; }
-.verification-status { color: #73806f; font-size: 12px; line-height: 1.6; }
-.retry-connection { padding: 6px 0; color: #536b45; background: transparent; border: 0; text-decoration: underline; cursor: pointer; }
 @media (min-width: 700px) { .login-page { grid-template-columns: 1fr 1fr; align-items: center; gap: 70px; } .login-intro { padding-bottom: 40px; } }
 @media (max-width: 360px) { .login-form { padding: 24px 18px; } }
 </style>

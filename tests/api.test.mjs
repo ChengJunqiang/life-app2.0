@@ -40,38 +40,14 @@ function expectError(check) {
 }
 
 describe('life-api contract', { concurrency: false }, () => {
-  test('loads login security configuration without exposing an existing session token', async () => {
-    const configuration = { turnstile: { enabled: true, siteKey: 'public-site-key' } };
-    await withFetch(() => json({ status: 200, data: configuration }), async (calls) => {
-      assert.deepEqual(await createLifeApi({ serverUrl, token: 'old-session' }).getLoginConfiguration(), configuration);
-      assert.equal(calls[0].url.pathname, '/life/auth/config');
-      assert.equal(calls[0].url.search, '');
-      assert.equal(calls[0].headers.get('Authorization'), null);
-    });
-  });
-
-  test('missing or malformed security configuration never silently disables verification', async () => {
-    for (const body of [
-      {}, { status: 200 }, { status: 200, data: {} },
-      { status: 200, data: { turnstile: { enabled: 'false', siteKey: '' } } },
-      { status: 200, data: { turnstile: { enabled: true, siteKey: '' } } },
-    ]) {
-      await withFetch(() => json(body), async () => {
-        await assert.rejects(createLifeApi({ serverUrl }).getLoginConfiguration(), ApiError);
-      });
-    }
-    await withFetch(() => json({ status: 200, data: { turnstile: { enabled: false, siteKey: '' } } }), async () => {
-      assert.deepEqual(await createLifeApi({ serverUrl }).getLoginConfiguration(), { turnstile: { enabled: false, siteKey: '' } });
-    });
-  });
-
-  test('login sends the challenge token in JSON and retains current menu permissions', async () => {
+  test('login sends credentials directly and retains current menu permissions', async () => {
     const permitted = { ...user, menuPermissions: ['item'] };
     await withFetch((call, index) => index === 1
       ? json({ status: 200, data: true, message: 'session-token' })
       : json({ status: 200, data: permitted }), async (calls) => {
-      const session = await createLifeApi({ serverUrl }).login('johnson', 'example-password', 'challenge-token');
-      assert.deepEqual(JSON.parse(calls[0].init.body), { username: 'johnson', password: 'example-password', turnstileToken: 'challenge-token' });
+      const session = await createLifeApi({ serverUrl }).login('johnson', 'example-password');
+      assert.deepEqual(calls.map(call => call.url.pathname), ['/life/auth/login', '/life/auth/info']);
+      assert.deepEqual(JSON.parse(calls[0].init.body), { username: 'johnson', password: 'example-password' });
       assert.equal(calls[0].url.search, '');
       assert.deepEqual(session.user.menuPermissions, ['item']);
     });
@@ -80,9 +56,9 @@ describe('life-api contract', { concurrency: false }, () => {
   for (const status of [401, 403, 429, 503]) {
     test(`HTTP ${status} login failure is useful and does not expire another session`, async () => {
       let expired = 0;
-      const message = status === 401 ? '用户名或密码错误' : status === 403 ? '安全验证未通过' : status === 429 ? '请求过于频繁，请稍后重试' : '服务暂不可用';
+      const message = status === 401 ? '用户名或密码错误' : status === 403 ? '没有此操作的权限' : status === 429 ? '请求过于频繁，请稍后重试' : '服务暂不可用';
       await withFetch(() => json({ status, message }, status), async (calls) => {
-        await assert.rejects(createLifeApi({ serverUrl, token: 'another-session', onUnauthorized: () => { expired += 1; } }).login('johnson', 'password', 'challenge'), expectError((error) => {
+        await assert.rejects(createLifeApi({ serverUrl, token: 'another-session', onUnauthorized: () => { expired += 1; } }).login('johnson', 'password'), expectError((error) => {
           assert.equal(error.status, status);
           assert.equal(error.uncertain, false);
           assert.equal(error.message, message);
