@@ -11,11 +11,6 @@
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
       <label class="field"><span>账号</span><input v-model.trim="form.username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" placeholder="请输入账号" :disabled="form.loading" required /></label>
       <label class="field"><span>密码</span><input v-model="form.password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" :disabled="form.loading" required /></label>
-      <details class="connection-settings" :open="!serverUrl">
-        <summary>连接设置</summary>
-        <label class="field"><span>服务地址</span><input v-model.trim="form.serverUrl" name="serverUrl" type="url" inputmode="url" autocomplete="url" autocapitalize="none" autocorrect="off" placeholder="https://api.example.com" :disabled="form.loading" /></label>
-        <p>填写 Life 服务的 HTTPS 地址。</p>
-      </details>
       <section v-if="form.captchaRequired" class="captcha-section" aria-label="登录图形验证码">
         <p class="captcha-notice">登录尝试较多，请填写图形验证码。</p>
         <div class="captcha-image-row">
@@ -38,13 +33,14 @@
 import { onBeforeUnmount, reactive, watch } from 'vue';
 import { createLifeApi } from '../services/api';
 import { createLoginController, createLoginState } from '../services/login';
+import { resolveServerConfig } from '../config/server';
 import type { AppSession } from '../types';
 
 const props = defineProps<{ serverUrl: string; notice: string }>();
 const emit = defineEmits<{ loggedIn: [session: AppSession] }>();
 const form = reactive(createLoginState(props.serverUrl));
 const controller = createLoginController(form, {
-  api: serverUrl => createLifeApi({ serverUrl, allowHttp: import.meta.env.DEV }),
+  api: serverUrl => createLifeApi(resolveServerConfig(serverUrl, import.meta.env.DEV)),
   loggedIn: session => emit('loggedIn', session),
 });
 watch(() => [form.serverUrl, form.username], controller.identityChanged, { flush: 'sync' });
@@ -67,10 +63,6 @@ onBeforeUnmount(controller.dispose);
 .login-form { display: grid; gap: 20px; padding: 28px 24px; }
 .login-heading h2 { margin: 0 0 8px; font-size: 23px; }
 .login-heading p { color: #7b8476; margin: 0; font-size: 13px; }
-.connection-settings { min-width: 0; font-size: 13px; color: #66765d; }
-.connection-settings summary { cursor: pointer; padding: 10px 0; }
-.connection-settings .field { margin-top: 10px; }
-.connection-settings p { font-size: 12px; color: #7c8775; line-height: 1.6; }
 .captcha-section { display: grid; gap: 12px; min-width: 0; }
 .captcha-notice { margin: 0; color: #73806f; font-size: 12px; line-height: 1.6; }
 .captcha-image-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }

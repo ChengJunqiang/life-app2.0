@@ -45,12 +45,13 @@ import LoginView from './views/LoginView.vue';
 import ItemsView from './views/ItemsView.vue';
 import StatisticsView from './views/StatisticsView.vue';
 import { createLifeApi, type LifeApi } from './services/api';
+import { resolveServerConfig } from './config/server';
 import type { AppSession } from './types';
 
 // Session and business data stay in memory. Cold starts require a fresh login.
 const session = shallowRef<AppSession | null>(null);
 const api = shallowRef<LifeApi | null>(null);
-const serverUrl = ref(String(import.meta.env.VITE_API_BASE_URL || ''));
+const serverUrl = ref(resolveServerConfig(import.meta.env.VITE_API_BASE_URL, import.meta.env.DEV).serverUrl);
 const sessionGeneration = ref(0);
 const loginNotice = ref('');
 const activeTab = ref<'items' | 'statistics'>('items');
@@ -73,7 +74,7 @@ function startSession(next: AppSession) {
   const generation = ++sessionGeneration.value;
   serverUrl.value = next.serverUrl;
   api.value = createLifeApi({
-    serverUrl: next.serverUrl, token: next.token, allowHttp: import.meta.env.DEV,
+    ...resolveServerConfig(next.serverUrl, import.meta.env.DEV), token: next.token,
     onUnauthorized: () => {
       // Late responses from a previous account must not clear a newer session.
       if (session.value && sessionGeneration.value === generation) clearSession('登录已过期，请重新登录。');

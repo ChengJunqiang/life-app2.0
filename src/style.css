@@ -9,9 +9,12 @@
   --muted: #74816d;
   --accent: #526d4e;
   --line: #e3e7dc;
+  --surface: #f6f6f0;
+  --safe-area-top: env(safe-area-inset-top, 0px);
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; }
+html { scroll-padding-top: calc(var(--safe-area-top) + 90px); touch-action: manipulation; }
+body { margin: 0; min-width: 320px; touch-action: manipulation; }
 button, input, select, textarea { font: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
@@ -19,8 +22,10 @@ button:disabled { opacity: .5; cursor: default; }
 a { color: inherit; }
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #789265; outline-offset: 3px; }
 h1, h2, h3, p { overflow-wrap: anywhere; }
-.app-shell { min-height: 100vh; min-height: 100dvh; }
-.app-header { width: min(1020px, 100%); margin: auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: max(18px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) 18px max(22px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); }
+.app-shell { min-height: 100vh; min-height: 100dvh; padding-top: var(--safe-area-top); }
+/* Keep scrolling content out of the system status bar, including after keyboard changes. */
+.app-shell::before { content: ""; position: fixed; z-index: 30; top: 0; right: 0; left: 0; height: var(--safe-area-top); background: var(--surface); pointer-events: none; }
+.app-header { position: sticky; z-index: 20; top: var(--safe-area-top); width: min(1020px, 100%); margin: auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px max(22px, env(safe-area-inset-right)) 18px max(22px, env(safe-area-inset-left)); background: var(--surface); border-bottom: 1px solid var(--line); }
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-size: 31px; font-weight: 700; letter-spacing: -.08em; }
 .brand-mark { width: 35px; height: 35px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: #e1e8d5; color: #526d4e; }
 .brand-mark svg { width: 27px; height: 27px; }

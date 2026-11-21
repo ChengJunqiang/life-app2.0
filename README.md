@@ -5,8 +5,8 @@ Vue 3 + TypeScript + Vite + Capacitor 7 手机客户端，与电脑端 `life-web
 ## 数据与功能
 
 ```text
-iPhone / Android App ── HTTPS ── life-api ── MySQL
-电脑 life-web       ── HTTPS ──────┘     └── Redis 登录会话
+iPhone / Android App ── HTTP / HTTPS ── life-api ── MySQL
+电脑 life-web       ── HTTP / HTTPS ──────┘     └── Redis 登录会话
 ```
 
 - 密码登录、退出和登录过期处理。
@@ -18,28 +18,27 @@ iPhone / Android App ── HTTPS ── life-api ── MySQL
 
 旧版本已经写入 IndexedDB 的内容不会自动上传，也不会在升级时删除。如果旧 App 中有尚未上传的账目，请在更换客户端前保留原始数据并单独安排导出迁移。
 
-## 配置 API 地址
+## 默认 API 与开发覆盖
 
-目前云端 `life-api` 尚未部署。本仓库提供可配置的客户端，不代表阿里云 API、数据库、HTTPS 或真机联调已经完成。
+App 默认连接阿里云 `life_dev` API：`http://123.56.173.230`。登录页面只展示账号、密码和按需图形验证码，不展示连接设置；使用时无需填写服务地址。
 
-使用 Node 20 或更新版本，在此目录执行：
+使用 Node 20 或更新版本，在此目录安装依赖：
 
 ```bash
 npm ci
-cp .env.example .env.local
 ```
 
-编辑 `.env.local`：
+开发环境或后续 HTTPS 地址可以通过构建变量覆盖。需要覆盖时再创建 `.env.local`，例如连接本机 API：
 
 ```dotenv
-VITE_API_BASE_URL=https://api.example.com
+VITE_API_BASE_URL=http://127.0.0.1:3002
 ```
 
-填写 API 服务的基础地址，**不要追加 `/life`**，客户端会自行追加各业务路径。如果反向代理统一使用路径前缀，可填写 `https://example.com/api`，使后端业务路径成为 `/api/life/...`。不要填写 MySQL 连接地址、数据库账号或密码。Vite 环境变量会进入前端资源，不能存放秘密。
+配置的是 API 服务的基础地址，**不要追加 `/life`**，客户端会自行追加各业务路径。如果 HTTPS 反向代理统一使用路径前缀，可填写 `https://example.com/api`，使后端业务路径成为 `/api/life/...`。不要填写 MySQL 连接地址、数据库账号或密码。Vite 环境变量会进入前端资源，不能存放秘密。
 
-修改环境文件后需要重启开发服务；已打包 App 的环境地址需要重新打包后才会更新。发布环境必须使用有效证书的 HTTPS 地址。
+修改环境文件后需要重启开发服务；已打包 App 的环境地址需要重新打包后才会更新。除当前明确配置的阿里云 HTTP 来源外，发布构建仅接受 HTTPS 服务地址。
 
-本地浏览器开发可使用 HTTP，例如 `http://127.0.0.1:3000`。真机上的 `localhost` 指手机本身，应使用电脑局域网地址；Android 模拟器访问开发电脑通常使用 `10.0.2.2`。原生调试优先使用 HTTPS：即使客户端开发模式允许 HTTP，iOS ATS、Android 明文流量和 WebView 混合内容策略仍可能阻止请求。本项目不会为 Release 开启任意 HTTP 或关闭证书验证。
+开发构建还允许 `localhost`、`127.0.0.1`、`::1` 和 Android 模拟器宿主 `10.0.2.2` 的 HTTP API。iOS 模拟器可用 `http://127.0.0.1:3002`；真机的 `localhost` 指手机本身，开发覆盖应使用可访问的 HTTPS 地址。原生 ATS、Android 明文流量和 WebView 策略独立生效；客户端策略不会允许任意 HTTP 或关闭证书验证。
 
 ## Web 开发与非构建检查
 
@@ -67,7 +66,7 @@ npm run cap:prepare -- android
 
 此命令只生成原生工程及 Android 依赖描述，不编译、不同步旧 Web 包，也不覆盖已有工程。原生工程未包含本次功能的已构建资源，第一次运行前仍需完成下面的构建与同步。
 
-本次改造没有执行任何构建。**以下命令会构建 Web 资源或原生应用，需在准备好工具链后由你明确启动。**
+**以下命令会构建 Web 资源或原生应用，需在准备好工具链后由你明确启动。**
 
 准备发布资源并同步到两个平台：
 
@@ -103,18 +102,18 @@ npm run dev:android
 
 请求使用 JSON 和 `Authorization: Bearer ...`。客户端同时检查 HTTP 状态和现有 API 的业务 `status`；部分字典接口成功时没有 `status`。金额可能由 MySQL 返回字符串，客户端统一转换用于展示。
 
-正常登录先校验服务地址，再通过 JSON 提交账号密码。API 按账号或来源 IP 统计连续失败，达到 3 次后会在登录错误中返回 `captchaRequired: true`；App 随后调用 `POST /life/auth/captcha`，显示 API 自己生成的 5 位 PNG 图形验证码，无需域名或外部验证脚本。客户端不自行判定失败阈值。
+正常登录使用预设服务地址，通过 JSON 提交账号密码。API 按账号或来源 IP 统计连续失败，达到 3 次后会在登录错误中返回 `captchaRequired: true`；App 随后调用 `POST /life/auth/captcha`，显示 API 自己生成的 5 位 PNG 图形验证码，无需域名或外部验证脚本。客户端不自行判定失败阈值。
 
 验证码有效期为 2 分钟；登录提交将 `captchaId` 和 `captchaCode` 一并放在 JSON body。每次提交后清除旧图片和答案，失败仍需验证时重新获取，不自动重试登录。图片加载失败、过期或未填写答案时不会降级为密码登录；可点击“刷新验证码”重试。切换账号或服务地址立即清除密码和旧挑战，过时响应不会覆盖当前页面。密码、验证码和会话凭证不会放入 URL 或持久化存储。API 必须部署对应版本并强制校验，客户端显示不能替代后端检查。
 
 只有拥有财务管理 `item` 权限的普通用户或管理员可以进入 App 的记账与统计页面；权限与数据归属仍由服务端逐请求检查。HTTP 403 显示权限错误，429 提示稍后重试，503 提示服务暂不可用；这些错误不会误清除仍有效的登录。登录请求的 401 也不会触发另一个已登录会话的过期处理。
 
-后续云端接入需要：
+云端部署与联调需核对：
 
-1. 在阿里云部署现有 `life-api` Node 服务，配置其 MySQL 和 Redis 连接。当前登录依赖 Redis，不是只安装 MySQL 即可使用。
+1. 阿里云 `life-api` Node 服务使用对应版本，并配置其 MySQL 和 Redis 连接。当前登录依赖 Redis，不是只安装 MySQL 即可使用。
 2. 核对现有数据库表结构、数据字典和迁移数据，用真实业务账号验证权限及统计口径。
 3. 配置 HTTPS 反向代理。浏览器请求需允许开发地址，打包后的 WebView 来源分别为 iOS `capacitor://localhost` 和 Android `https://localhost`；如收紧 CORS，保留对应来源及 `Authorization`、`Content-Type` 请求头。
 4. 与 `life-api` 的安全分支配套部署，配置服务端限流、权限及会话撤销；核对旧密码迁移行为后再开放公网。客户端校验不能替代后端保护。
-5. 将 `.env.local` 配成真实 API 地址，再执行云端接口联调及 iPhone / Android 真机验证。
+5. 默认使用预设阿里云 API；如需切换 HTTPS 或开发服务，在构建时覆盖地址，再执行云端接口联调及 iPhone / Android 真机验证。
 
 普通用户的数据范围由 `life-api` 决定；管理员在现有 Web/API 中默认可查看所有用户数据，App 沿用该规则。转出和转入保留独立类型，不计入统计中的收入、支出和结余。
