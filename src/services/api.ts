@@ -3,17 +3,29 @@ import type {
   ItemKind, ItemList, LifeItem, MonthlyReport, ServerUser, TotalReport,
 } from '../types';
 
+interface ErrorMetadata { captchaRequired?: unknown; code?: unknown }
+
 export class ApiError extends Error {
   status: number;
   uncertain: boolean;
+  captchaRequired: boolean;
+  code: string;
 
-  constructor(message: string, status = 0, uncertain = false) {
+  constructor(message: string, status = 0, uncertain = false, metadata: ErrorMetadata = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.uncertain = uncertain;
+    this.captchaRequired = metadata.captchaRequired === true;
+    this.code = metadata.code === 'CAPTCHA_REQUIRED' || metadata.code === 'CAPTCHA_INVALID' ? metadata.code : '';
   }
 }
+
+export type LoginCaptcha = { captchaRequired: false } | {
+  captchaRequired: true; captchaId: string; image: string; expiresIn: number;
+};
+
+export interface CaptchaAnswer { captchaId: string; captchaCode: string }
 
 interface ApiOptions {
   serverUrl: string;
@@ -111,9 +123,11 @@ export function createLifeApi(options: ApiOptions) {
         if (response.status === 401 && bearerToken) options.onUnauthorized?.();
         const uncertain = mutation && response.status >= 500;
         let reason = '';
+        let metadata: ErrorMetadata = {};
         try {
-          const problem = await response.json();
-          if (typeof problem?.message === 'string') reason = problem.message;
+          const problem = object(await response.json());
+          if (typeof problem.message === 'string') reason = problem.message;
+          metadata = { captchaRequired: problem.captchaRequired, code: problem.code };
         } catch { /* Gateways may return HTML errors. Use safe status fallbacks. */ }
         const fallback = response.status === 401 ? (bearerToken ? '登录已过期，请重新登录。' : '用户名或密码错误。')
           : response.status === 403 ? '没有此操作的权限。'
@@ -122,7 +136,7 @@ export function createLifeApi(options: ApiOptions) {
                 : `请求失败（${response.status}），请稍后重试。`;
         throw new ApiError(
           response.status === 401 && bearerToken ? fallback : `${reason || fallback}${uncertain ? ` ${uncertainMessage}` : ''}`,
-          response.status, uncertain,
+          response.status, uncertain, metadata,
         );
       }
       let body: JsonBody;
@@ -141,7 +155,7 @@ export function createLifeApi(options: ApiOptions) {
         throw new ApiError(
           status === 401 ? (bearerToken ? '登录已过期，请重新登录。' : '用户名或密码错误。')
             : `${String(body.message || '请求失败。')}${uncertain ? ` ${uncertainMessage}` : ''}`,
-          status, uncertain,
+          status, uncertain, body,
         );
       }
       return body;
@@ -161,12 +175,27 @@ export function createLifeApi(options: ApiOptions) {
   }
 
   return {
-    async login(username: string, password: string): Promise<AppSession> {
+    async getLoginCaptcha(username: string): Promise<LoginCaptcha> {
+      const result = await request('/auth/captcha', { method: 'POST', body: JSON.stringify({ username }) }, '');
+      if (Number(result.status) !== 200) throw new ApiError('无法读取图形验证码，请重试。');
+      const data = object(result.data);
+      if (data.captchaRequired === false) return { captchaRequired: false };
+      if (data.captchaRequired !== true || typeof data.captchaId !== 'string' || !/^[a-f0-9]{64}$/.test(data.captchaId) ||
+          typeof data.image !== 'string' || data.image.length > 262144 ||
+          !/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]+={0,2}$/.test(data.image) ||
+          typeof data.expiresIn !== 'number' || !Number.isInteger(data.expiresIn) || data.expiresIn < 1 || data.expiresIn > 120) {
+        throw new ApiError('图形验证码响应不完整，请刷新后重试。');
+      }
+      return { captchaRequired: true, captchaId: data.captchaId, image: data.image, expiresIn: data.expiresIn };
+    },
+    async login(username: string, password: string, captcha?: CaptchaAnswer): Promise<AppSession> {
       const result = await request('/auth/login', {
-        method: 'POST', body: JSON.stringify({ username, password }),
+        method: 'POST', body: JSON.stringify({ username, password, ...(captcha ? {
+          captchaId: captcha.captchaId, captchaCode: captcha.captchaCode,
+        } : {}) }),
       }, '');
       if (result.data !== true || typeof result.message !== 'string' || !result.message) {
-        throw new ApiError(result.data === false ? '用户名或密码错误。' : '登录响应格式不正确。');
+        throw new ApiError(result.data === false ? '用户名或密码错误。' : '登录响应格式不正确。', result.data === false ? 401 : 0, false, result);
       }
       const info = await request('/auth/info', {}, result.message);
       return { serverUrl, token: result.message, user: mapUser(info.data) };

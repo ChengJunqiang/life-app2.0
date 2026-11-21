@@ -53,6 +53,90 @@ describe('life-api contract', { concurrency: false }, () => {
     });
   });
 
+  test('captcha retrieval uses a credential-free POST and exposes only validated challenge fields', async () => {
+    const challenge = {
+      captchaRequired: true, captchaId: 'a'.repeat(64), expiresIn: 120,
+      image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0ZkAAAAASUVORK5CYII=',
+    };
+    await withFetch(() => json({ status: 200, data: { ...challenge, answer: 'never expose this' } }), async calls => {
+      const result = await createLifeApi({ serverUrl, token: 'another-session' }).getLoginCaptcha('johnson');
+      assert.deepEqual(result, challenge);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url.pathname, '/life/auth/captcha');
+      assert.equal(calls[0].url.search, '');
+      assert.equal(calls[0].init.method, 'POST');
+      assert.deepEqual(JSON.parse(calls[0].init.body), { username: 'johnson' });
+      assert.equal(calls[0].headers.get('Authorization'), null);
+    });
+    await withFetch(() => json({ status: 200, data: { captchaRequired: false } }), async () => {
+      assert.deepEqual(await createLifeApi({ serverUrl }).getLoginCaptcha('johnson'), { captchaRequired: false });
+    });
+  });
+
+  test('captcha responses reject external or SVG images, malformed IDs and invalid expiry', async () => {
+    const valid = {
+      captchaRequired: true, captchaId: 'a'.repeat(64), expiresIn: 120,
+      image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0ZkAAAAASUVORK5CYII=',
+    };
+    for (const data of [
+      {}, { captchaRequired: 'false' }, { ...valid, captchaId: 'guessable-id' },
+      { ...valid, image: 'https://attacker.example/image.png' },
+      { ...valid, image: 'data:image/svg+xml;base64,PHN2Zz4=' },
+      { ...valid, image: 'data:image/png;base64,invalid' },
+      { ...valid, expiresIn: 0 }, { ...valid, expiresIn: 121 }, { ...valid, expiresIn: '120' },
+    ]) {
+      await withFetch(() => json({ status: 200, data }), async () => {
+        await assert.rejects(createLifeApi({ serverUrl }).getLoginCaptcha('johnson'), ApiError);
+      });
+    }
+  });
+
+  test('login submits a one-use captcha answer only in its JSON body', async () => {
+    const captcha = { captchaId: 'b'.repeat(64), captchaCode: 'ABC23' };
+    await withFetch((call, index) => index === 1
+      ? json({ status: 200, data: true, message: 'session-token' })
+      : json({ status: 200, data: user }), async calls => {
+      await createLifeApi({ serverUrl, token: 'old-session' }).login('johnson', 'password', { ...captcha, image: 'not submitted' });
+      assert.deepEqual(JSON.parse(calls[0].init.body), { username: 'johnson', password: 'password', ...captcha });
+      assert.equal(calls[0].url.search, '');
+      assert.equal(calls[0].headers.get('Authorization'), null);
+      assert.equal(calls[1].headers.get('Authorization'), 'Bearer session-token');
+    });
+  });
+
+  for (const transportStatus of [200, 400, 401]) {
+    test(`HTTP ${transportStatus} captcha errors preserve safe metadata without expiring another session`, async () => {
+      const body = {
+        status: transportStatus === 401 ? 401 : 400, data: false, message: '请输入图形验证码',
+        captchaRequired: true, code: 'CAPTCHA_REQUIRED', config: { password: 'private-password' },
+      };
+      let expired = 0;
+      await withFetch(() => json(body, transportStatus), async calls => {
+        await assert.rejects(createLifeApi({ serverUrl, token: 'another-session', onUnauthorized: () => { expired++; } }).login('johnson', 'private-password'), expectError(error => {
+          assert.equal(error.captchaRequired, true);
+          assert.equal(error.code, 'CAPTCHA_REQUIRED');
+          assert.equal(error.response, undefined);
+          assert.equal(error.config, undefined);
+          assert.equal(JSON.stringify(error).includes('private-password'), false);
+        }));
+        assert.equal(expired, 0);
+        assert.equal(calls.length, 1);
+      });
+    });
+  }
+
+  test('legacy data-false login retains captcha signal, and malformed metadata is never trusted', async () => {
+    await withFetch(() => json({ status: 200, data: false, captchaRequired: true }), async () => {
+      await assert.rejects(createLifeApi({ serverUrl }).login('johnson', 'password'), expectError(error => assert.equal(error.captchaRequired, true)));
+    });
+    await withFetch(() => json({ status: 400, captchaRequired: 'true', code: { private: 'payload' } }, 400), async () => {
+      await assert.rejects(createLifeApi({ serverUrl }).login('johnson', 'password'), expectError(error => {
+        assert.equal(error.captchaRequired, false);
+        assert.equal(error.code, '');
+      }));
+    });
+  });
+
   for (const status of [401, 403, 429, 503]) {
     test(`HTTP ${status} login failure is useful and does not expire another session`, async () => {
       let expired = 0;

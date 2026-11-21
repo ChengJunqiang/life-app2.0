@@ -94,6 +94,7 @@ npm run dev:android
 
 | 功能 | 接口 |
 | --- | --- |
+| 登录图形验证码 | `POST /life/auth/captcha` |
 | 登录 / 当前用户 / 退出 | `POST /life/auth/login`、`GET /life/auth/info`、`POST /life/auth/logout` |
 | 分类 / 支付方式 | `GET /life/dictionaries/options/query?type=item_type`、`type=pay_type` |
 | 明细 / 单条详情 | `GET /life/items/query`、`GET /life/items/query/:id` |
@@ -102,7 +103,9 @@ npm run dev:android
 
 请求使用 JSON 和 `Authorization: Bearer ...`。客户端同时检查 HTTP 状态和现有 API 的业务 `status`；部分字典接口成功时没有 `status`。金额可能由 MySQL 返回字符串，客户端统一转换用于展示。
 
-填写服务地址、账号和密码即可登录；客户端先校验地址，再直接通过 JSON 提交账号密码，不加载外部验证脚本或验证页面。密码和会话凭证不会放入 URL 或持久化存储。
+正常登录先校验服务地址，再通过 JSON 提交账号密码。API 按账号或来源 IP 统计连续失败，达到 3 次后会在登录错误中返回 `captchaRequired: true`；App 随后调用 `POST /life/auth/captcha`，显示 API 自己生成的 5 位 PNG 图形验证码，无需域名或外部验证脚本。客户端不自行判定失败阈值。
+
+验证码有效期为 2 分钟；登录提交将 `captchaId` 和 `captchaCode` 一并放在 JSON body。每次提交后清除旧图片和答案，失败仍需验证时重新获取，不自动重试登录。图片加载失败、过期或未填写答案时不会降级为密码登录；可点击“刷新验证码”重试。切换账号或服务地址立即清除密码和旧挑战，过时响应不会覆盖当前页面。密码、验证码和会话凭证不会放入 URL 或持久化存储。API 必须部署对应版本并强制校验，客户端显示不能替代后端检查。
 
 只有拥有财务管理 `item` 权限的普通用户或管理员可以进入 App 的记账与统计页面；权限与数据归属仍由服务端逐请求检查。HTTP 403 显示权限错误，429 提示稍后重试，503 提示服务暂不可用；这些错误不会误清除仍有效的登录。登录请求的 401 也不会触发另一个已登录会话的过期处理。
 
